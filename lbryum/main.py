@@ -2,8 +2,9 @@ import json
 import logging
 import os
 import sys
+import getpass
+import requests  # TODO: use txrequests
 
-import requests
 from lbryum.commands import Commands, config_variables, get_parser
 from lbryum.daemon import Daemon, get_daemon
 from lbryum.network import Network, SimpleConfig
@@ -13,13 +14,9 @@ from lbryum.wallet import Wallet, WalletStorage
 
 log = logging.getLogger(__name__)
 
-script_dir = os.path.dirname(os.path.realpath(__file__))
-is_bundle = getattr(sys, 'frozen', False)
-
 
 # get password routine
 def prompt_password(prompt, confirm=True):
-    import getpass
     password = getpass.getpass(prompt, stream=None)
     if password and confirm:
         password2 = getpass.getpass("Confirm: ")
@@ -102,20 +99,6 @@ def init_cmdline(config_options):
     cmdname = config.get('cmd')
     cmd = Commands.known_commands[cmdname]
 
-    if cmdname == 'signtransaction' and config.get('privkey'):
-        cmd.requires_wallet = False
-        cmd.requires_password = False
-
-    if cmdname in ['payto', 'paytomany'] and config.get('unsigned'):
-        cmd.requires_password = False
-
-    if cmdname in ['payto', 'paytomany'] and config.get('broadcast'):
-        cmd.requires_network = True
-
-    if cmdname in ['createrawtx'] and config.get('unsigned'):
-        cmd.requires_password = False
-        cmd.requires_wallet = False
-
     # instanciate wallet for command-line
     storage = WalletStorage(config.get_wallet_path())
 
@@ -140,6 +123,7 @@ def init_cmdline(config_options):
             if not password:
                 print "Error: Password required"
                 sys.exit(1)
+            Wallet(storage).check_password(password)
     else:
         password = None
 
@@ -147,6 +131,7 @@ def init_cmdline(config_options):
 
     if cmd.name == 'password':
         new_password = prompt_password('New password:')
+        config_options['password'] = password
         config_options['new_password'] = new_password
 
     return cmd, password
