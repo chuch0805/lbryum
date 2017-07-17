@@ -1,3 +1,5 @@
+import keyring
+import getpass
 import argparse
 import ast
 import base64
@@ -39,6 +41,7 @@ log = logging.getLogger(__name__)
 
 ADDRESS_LENGTH = 25
 MAX_PAGE_SIZE = 500
+_KEY_RING = keyring.get_keyring()
 
 
 # Format output from lbrycrd to have consistently
@@ -153,9 +156,68 @@ class Commands(object):
         self.wallet = wallet
         self.network = network
         self._callback = callback
-        self._password = password
-        self.new_password = new_password
         self.contacts = Contacts(self.config)
+        self._password = None
+        self.new_password = None
+        if self.wallet.use_encryption and not password:
+            # see if we can find the wallet password in the key ring, if not the user must
+            # provide it
+            password = _KEY_RING.get_password("lbryum", getpass.getuser())
+            if password:
+                self.unlock_wallet(password)
+                log.info("unlocked the wallet using password from %s" % _KEY_RING.name)
+            else:
+                log.info("wallet password was not specified and is not in the keyring, "
+                         "it must be provided to unlock the wallet")
+        elif self.wallet.use_encryption and password:
+            self.unlock_wallet(password)
+        if self.wallet.use_encryption and new_password:
+            self.update_password(new_password)
+
+    @property
+    def locked(self):
+        return self._password is None and self.wallet.use_encryption
+
+    def unlock_wallet(self, password):
+        if self._password:
+            return
+        if not self.wallet.use_encryption:
+            return
+        self.wallet.check_password(password)
+        self._password = password
+        self.new_password = None
+        return
+
+    def lock_wallet(self):
+        if self.locked:
+            return
+        self._password = None
+        self.new_password = None
+
+    def decrypt_wallet(self):
+        if not self.wallet.use_encryption:
+            return
+        with self.wallet.storage.lock:
+            self.wallet.check_password(self._password)
+            self.new_password = None
+            self.wallet.update_password(self._password, self.new_password)
+            self.wallet.storage.write()
+            self._password = None
+        return
+
+    def update_password(self, new_password, update_keyring=True):
+        if not new_password:
+            return
+        if self.wallet.use_encryption:
+            self.wallet.check_password(self._password)
+        with self.wallet.storage.lock:
+            self.new_password = new_password
+            self.wallet.update_password(self._password, self.new_password)
+            if update_keyring:
+                _KEY_RING.set_password("lbryum", getpass.getuser(), new_password)
+            self.wallet.storage.write()
+            self._password = self.new_password
+        return
 
     @command('')
     def commands(self):
@@ -1165,8 +1227,8 @@ class Commands(object):
 
         out = self.network.synchronous_get(('blockchain.claimtrie.getclaimsintx', [txid]))
         claims = format_amount_value(format_lbrycrd_keys(out, raw))
-        claim_not_found_out = {'success':False, 'error':'claim not found',
-                               'outpoint':'%s:%i'%(txid, nout)}
+        claim_not_found_out = {'success': False, 'error': 'claim not found',
+                               'outpoint': '%s:%i' % (txid, nout)}
         if claims is None:
             return claim_not_found_out
         for claim in claims:
