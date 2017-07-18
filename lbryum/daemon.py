@@ -1,6 +1,6 @@
 import ast
 import os
-
+import logging
 import jsonrpclib
 from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCRequestHandler, SimpleJSONRPCServer
 
@@ -15,6 +15,13 @@ def lockfile(config):
 
 
 def get_daemon(config):
+    log = logging.getLogger("lbryum")
+
+    DEFAULT_FORMAT = "%(asctime)s %(levelname)-8s %(name)s:%(lineno)d: %(message)s"
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(DEFAULT_FORMAT))
+    log.addHandler(handler)
     try:
         with open(lockfile(config)) as f:
             host, port = ast.literal_eval(f.read())
